@@ -2,7 +2,7 @@
 
 一个支持**知识库检索增强（RAG）** 与 **工具调用（ReAct）** 的智能体对话平台，提供类 ChatGPT 的交互体验：流式输出、思考过程可见、工具调用可追溯、回答带引用来源。
 
-基于 [`spring-ai-agentx`](https://github.com/bigchuidw3/spring-ai-agentx) 提供的 `spring-ai-agentx-core` + `spring-ai-agentx-rag` 两个库构建（**只依赖 jar，不修改框架**）。
+基于 [`spring-ai-agentx`](https://github.com/bigchuidw3/spring-ai-agentx) 提供的 `spring-ai-agentx-core` + `spring-ai-agentx-rag` 两个库构建。
 
 ---
 
