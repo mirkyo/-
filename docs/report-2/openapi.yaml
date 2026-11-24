@@ -1,0 +1,1183 @@
+openapi: 3.1.0
+
+info:
+  title: 知微（ZhiWei）智能体平台 API
+  version: 1.0.0
+  description: |
+    支持知识库检索增强（RAG）与工具调用（ReAct）的智能体对话平台。
+
+    ## 通用约定
+
+    - 除登录、注册、健康检查外，所有接口需携带 `Authorization: Bearer <token>`
+    - 业务响应统一包裹为 `{ code, msg, data }`，`code = 0` 表示成功
+    - HTTP 状态码与业务码并存：`401` 未认证、`403` 无权限、`400` 参数错误
+    - 流式接口返回 `text/event-stream`
+
+    ## 角色
+
+    | 角色 | 权限 |
+    |---|---|
+    | `SUPER_ADMIN` | 全部 |
+    | `ADMIN` | 用户管理、技能管理 |
+    | `USER` | 自己的知识库、会话、对话 |
+
+servers:
+  - url: http://localhost:8000
+    description: 本地开发
+  - url: https://your-domain.example.com
+    description: 生产环境
+
+tags:
+  - name: 认证
+    description: 登录、注册、当前用户
+  - name: 对话
+    description: 流式对话、中断恢复、回放
+  - name: 知识库
+    description: 知识库与文档管理
+  - name: 会话
+    description: 会话列表与删除
+  - name: 技能
+    description: 技能包管理
+  - name: 用户管理
+    description: 管理员用户管理
+  - name: 资产
+    description: 文档内图片资产
+  - name: 系统
+    description: 健康检查
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ==================== 认证 ====================
+  /api/auth/login:
+    post:
+      tags: [认证]
+      summary: 登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: admin
+              password: your-password
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: 用户名或密码错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/auth/register:
+    post:
+      tags: [认证]
+      summary: 注册
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: 参数校验失败或用户名已存在
+
+  /api/auth/logout:
+    post:
+      tags: [认证]
+      summary: 登出
+      responses:
+        '200':
+          description: 登出成功
+
+  /api/auth/me:
+    get:
+      tags: [认证]
+      summary: 当前登录用户
+      responses:
+        '200':
+          description: 用户信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserVO'
+        '401':
+          description: 未认证
+
+  # ==================== 对话 ====================
+  /api/chat/stream:
+    post:
+      tags: [对话]
+      summary: 发起对话（SSE 流式）
+      description: |
+        返回 `text/event-stream`。事件按 `id: <seq>` 递增编号，前端记录 `lastSeq`
+        以便断线后通过 `/api/chat/recover` 续传。
+
+        事件类型：
+        - `Thinking` 思考增量 · `content`
+        - `ToolStart` 工具开始 · `toolName` `toolCallId` `arguments`
+        - `ToolEnd` 工具结束 · `toolCallId` `result`
+        - `Text` 正文增量 · `content`
+        - `Citations` 引用列表 · `items`
+        - `Error` 失败 · `message`
+        - `Stopped` 中断 · `message`
+        - `Complete` 结束 · `conversationId`
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            example:
+              query: 红色图片里画了什么
+              knowledgeBaseIds: [3]
+              model: opus55
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: '每帧形如 id: <seq> / data: <json>，以空行分隔'
+              example: |
+                id: 1
+                data: {"type":"Thinking","content":"用户"}
+
+                id: 2
+                data: {"type":"ToolStart","toolName":"kbSearch","toolCallId":"c1"}
+
+                id: 3
+                data: {"type":"Text","content":"RAG 是"}
+
+  /api/chat/attach:
+    post:
+      tags: [对话]
+      summary: 上传对话附件（仅本轮有效，不入知识库）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: 解析结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          fileName:
+                            type: string
+                          text:
+                            type: string
+                            description: 解析出的纯文本
+
+  /api/chat/models:
+    get:
+      tags: [对话]
+      summary: 可用模型档位列表
+      responses:
+        '200':
+          description: 档位列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            key:
+                              type: string
+                              example: opus55
+                            label:
+                              type: string
+                              example: Opus 5.5
+
+  /api/chat/status:
+    get:
+      tags: [对话]
+      summary: 查询会话是否有进行中的流
+      parameters:
+        - name: conversationId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          streaming:
+                            type: boolean
+
+  /api/chat/stop:
+    post:
+      tags: [对话]
+      summary: 中断生成
+      parameters:
+        - name: conversationId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 已中断
+
+  /api/chat/resume:
+    post:
+      tags: [对话]
+      summary: 继续生成（从中断快照恢复）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/chat/recover:
+    post:
+      tags: [对话]
+      summary: 断点续传（从指定事件序号继续）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            example:
+              query: 继续
+              conversationId: 6f1c8e2a-...
+              recovery: true
+              startSeq: 42
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/chat/replay/{conversationId}:
+    get:
+      tags: [对话]
+      summary: 会话回放（含思考、工具、引用）
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '200':
+          description: 回放数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          conversationId:
+                            type: string
+                          messages:
+                            type: array
+                            items:
+                              type: object
+                          turns:
+                            type: array
+                            items:
+                              type: object
+        '403':
+          description: 无权访问该会话
+
+  # ==================== 知识库 ====================
+  /api/rag/knowledge-base:
+    get:
+      tags: [知识库]
+      summary: 我的知识库列表
+      responses:
+        '200':
+          description: 列表（仅当前用户）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/KnowledgeBase'
+    post:
+      tags: [知识库]
+      summary: 创建知识库
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeBaseRequest'
+      responses:
+        '200':
+          description: 新建的知识库 ID
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: integer
+                        format: int64
+
+  /api/rag/knowledge-base/{id}:
+    put:
+      tags: [知识库]
+      summary: 修改知识库
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeBaseRequest'
+      responses:
+        '200':
+          description: 修改成功
+        '403':
+          description: 无权操作该知识库
+    delete:
+      tags: [知识库]
+      summary: 删除知识库
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      responses:
+        '200':
+          description: 删除成功
+        '403':
+          description: 无权操作该知识库
+
+  /api/rag/knowledge-base/{id}/document:
+    get:
+      tags: [知识库]
+      summary: 知识库下的文档列表
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      responses:
+        '200':
+          description: 文档列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/KnowledgeDocument'
+
+  /api/rag/document/preview:
+    post:
+      tags: [知识库]
+      summary: 文档解析预览（不落库）
+      description: |
+        解析并分块，返回预览结果供用户确认。不写入数据库。
+        用户确认后调用 `/api/rag/document/commit` 正式入库。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                parserType:
+                  type: string
+                  enum: [TIKA, MINERU]
+                  default: TIKA
+                splitterType:
+                  type: string
+                  enum: [SLIDING, RECURSIVE, HEADING]
+                  default: RECURSIVE
+                chunkSize:
+                  type: integer
+                  default: 500
+                overlap:
+                  type: integer
+                  default: 50
+                maxParentSize:
+                  type: integer
+                  default: 5000
+                headingLevel:
+                  type: integer
+                  default: 2
+                parentChild:
+                  type: boolean
+                  default: false
+                enableImageUnderstanding:
+                  type: boolean
+                  default: false
+                  description: 需配置多模态模型，否则返回 400
+      responses:
+        '200':
+          description: 解析与分块结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DocumentPreviewResponse'
+        '400':
+          description: 解析失败或参数非法
+
+  /api/rag/document/commit:
+    post:
+      tags: [知识库]
+      summary: 确认入库（向量化）
+      description: 提交预览结果，生成 `documentId`（内容 SHA-256，幂等）并写入向量库。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentCommitRequest'
+      responses:
+        '200':
+          description: 入库成功
+
+  /api/rag/document/{id}:
+    delete:
+      tags: [知识库]
+      summary: 删除文档
+      description: 同时删除数据库记录、向量数据与磁盘文件。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 删除成功
+
+  /api/rag/knowledge-base/{id}/chat/stream:
+    post:
+      tags: [知识库]
+      summary: 限定单库对话（SSE）
+      description: 与 `/api/chat/stream` 一致，但强制把检索范围收窄到指定的知识库。
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  # ==================== 会话 ====================
+  /api/sessions:
+    get:
+      tags: [会话]
+      summary: 我的会话列表
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 30
+      responses:
+        '200':
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          total:
+                            type: integer
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Conversation'
+
+  /api/sessions/{conversationId}:
+    get:
+      tags: [会话]
+      summary: 会话明细
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '200':
+          description: 会话消息
+        '403':
+          description: 无权访问该会话
+    delete:
+      tags: [会话]
+      summary: 删除会话
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '200':
+          description: 删除成功
+        '403':
+          description: 无权操作该会话
+
+  # ==================== 技能 ====================
+  /api/skills:
+    get:
+      tags: [技能]
+      summary: 技能列表
+      responses:
+        '200':
+          description: 技能列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SkillInfo'
+
+  /api/skills/upload:
+    post:
+      tags: [技能]
+      summary: 上传技能包（仅管理员）
+      description: |
+        上传 zip 包，包内需包含 `SKILL.md`（支持最多 3 层目录）。
+
+        `SKILL.md` 需以 YAML frontmatter 开头：
+
+        ```markdown
+        ---
+        name: my-skill
+        description: 技能说明
+        ---
+        # 正文
+        ```
+
+        解析器兼容 GBK 编码的 zip 文件名与带 UTF-8 BOM 的 `SKILL.md`。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SkillInfo'
+        '403':
+          description: 需要管理员权限
+
+  /api/skills/{name}/enabled:
+    put:
+      tags: [技能]
+      summary: 启用 / 停用技能（仅管理员）
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: enabled
+          in: query
+          required: true
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: 操作成功
+        '403':
+          description: 需要管理员权限
+
+  /api/skills/{name}:
+    delete:
+      tags: [技能]
+      summary: 删除技能（仅管理员）
+      description: 同时删除数据库记录与磁盘目录，不可恢复。
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+        '403':
+          description: 需要管理员权限
+
+  # ==================== 用户管理 ====================
+  /api/admin/user:
+    get:
+      tags: [用户管理]
+      summary: 用户列表（仅管理员）
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 用户列表
+        '403':
+          description: 需要管理员权限
+    post:
+      tags: [用户管理]
+      summary: 创建用户（仅管理员）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSaveRequest'
+      responses:
+        '200':
+          description: 新建用户 ID
+        '403':
+          description: 需要管理员权限
+
+  /api/admin/user/{id}:
+    put:
+      tags: [用户管理]
+      summary: 修改用户（仅管理员）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSaveRequest'
+      responses:
+        '200':
+          description: 修改成功
+    delete:
+      tags: [用户管理]
+      summary: 删除用户（仅管理员）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 删除成功
+
+  # ==================== 资产 ====================
+  /api/assets/{path}:
+    get:
+      tags: [资产]
+      summary: 获取文档内图片
+      description: |
+        支持两种寻址方式：
+        - `{batchId}/images/{文件名}`：精确路径
+        - `{文件名}`：按文件名反查（后端遍历 assets 目录兜底）
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 326a9daa-6377-4ecd-b8b1-d93dbe4cec00/images/985b0096....jpg
+      responses:
+        '200':
+          description: 图片二进制流
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: 资产不存在
+
+  # ==================== 系统 ====================
+  /api/health:
+    get:
+      tags: [系统]
+      summary: 健康检查
+      security: []
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            example: UP
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    KnowledgeBaseId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: 0 表示成功
+          example: 0
+        msg:
+          type: string
+          example: ok
+        data:
+          nullable: true
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        password:
+          type: string
+          minLength: 6
+          maxLength: 64
+        nickname:
+          type: string
+          maxLength: 64
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT
+        user:
+          $ref: '#/components/schemas/UserVO'
+
+    UserVO:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        tenantId:
+          type: integer
+          format: int64
+        username:
+          type: string
+        nickname:
+          type: string
+        email:
+          type: string
+        avatar:
+          type: string
+        role:
+          type: string
+          enum: [SUPER_ADMIN, ADMIN, USER]
+        status:
+          type: integer
+          description: 0 启用 1 禁用
+        lastLoginAt:
+          type: string
+          format: date-time
+        createTime:
+          type: string
+          format: date-time
+
+    UserSaveRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          description: 留空表示不修改
+        nickname:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [SUPER_ADMIN, ADMIN, USER]
+        status:
+          type: integer
+
+    ChatRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: 用户提问
+        conversationId:
+          type: string
+          description: 会话 ID；空表示新建
+        knowledgeBaseIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: 检索范围；空表示该用户全部知识库
+        recovery:
+          type: boolean
+          description: true 表示续传请求
+        startSeq:
+          type: integer
+          format: int64
+          description: 续传起始事件序号
+        model:
+          type: string
+          description: 模型档位 key，默认 opus55
+        attachmentName:
+          type: string
+        attachmentText:
+          type: string
+
+    KnowledgeBase:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        tenantId:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        name:
+          type: string
+        description:
+          type: string
+        createTime:
+          type: string
+          format: date-time
+        updateTime:
+          type: string
+          format: date-time
+
+    KnowledgeBaseRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 512
+
+    KnowledgeDocument:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        knowledgeBaseId:
+          type: integer
+          format: int64
+        fileName:
+          type: string
+        fileType:
+          type: string
+        fileSize:
+          type: integer
+          format: int64
+        documentId:
+          type: string
+          description: 内容 SHA-256
+        parserType:
+          type: string
+          enum: [TIKA, MINERU]
+        splitterType:
+          type: string
+          enum: [SLIDING, RECURSIVE, HEADING]
+        chunkCount:
+          type: integer
+        parentChild:
+          type: boolean
+        status:
+          type: string
+          enum: [SUCCESS, FAILED]
+        errorMsg:
+          type: string
+        createTime:
+          type: string
+          format: date-time
+
+    DocumentPreviewResponse:
+      type: object
+      properties:
+        documentId:
+          type: string
+        fileName:
+          type: string
+        totalChunks:
+          type: integer
+        parentChunks:
+          type: integer
+        childChunks:
+          type: integer
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChunkPreview'
+
+    ChunkPreview:
+      type: object
+      properties:
+        index:
+          type: integer
+        role:
+          type: string
+          description: parent / child / chunk
+        text:
+          type: string
+        type:
+          type: string
+          description: text / image / table
+        assetUrl:
+          type: string
+          nullable: true
+          description: 图片块的可访问地址
+
+    DocumentCommitRequest:
+      type: object
+      required: [knowledgeBaseId, documentId, fileName, chunks]
+      properties:
+        knowledgeBaseId:
+          type: integer
+          format: int64
+        documentId:
+          type: string
+        fileName:
+          type: string
+        parserType:
+          type: string
+        splitterType:
+          type: string
+        chunkSize:
+          type: integer
+        overlap:
+          type: integer
+        parentChild:
+          type: boolean
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChunkPreview'
+
+    Conversation:
+      type: object
+      properties:
+        conversationId:
+          type: string
+        title:
+          type: string
+        messageCount:
+          type: integer
+        knowledgeBaseIds:
+          type: string
+          description: 逗号分隔的库 ID
+        createTime:
+          type: string
+          format: date-time
+        updateTime:
+          type: string
+          format: date-time
+
+    SkillInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        skillPath:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+
+    Citation:
+      type: object
+      properties:
+        no:
+          type: integer
+          description: 正文中 [n] 的编号
+        fileName:
+          type: string
+        headingPath:
+          type: string
+        chunkId:
+          type: string
+        documentId:
+          type: string
+        text:
+          type: string
+        assetUrl:
+          type: string
+          nullable: true
+          description: 图片块的可访问地址
+        contentType:
+          type: string
+          enum: [text, image, table]

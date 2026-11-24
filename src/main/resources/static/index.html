@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<title>知微</title>
+<script>
+  // 未登录 / token 过期 / 无用户信息 → 登录页；否则进对话页
+  // 直接解 JWT exp，避免"token 还在但已过期"被一路送进 chat.html 卡住
+  function zwTokenValid(t) {
+    if (!t) return false;
+    try {
+      var s = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      var p = JSON.parse(decodeURIComponent(escape(atob(s))));
+      return !!(p && p.exp && p.exp * 1000 > Date.now() + 5000);
+    } catch (e) { return false; }
+  }
+  var t = localStorage.getItem('zw-token');
+  var u = localStorage.getItem('zw-user');
+  if (!zwTokenValid(t) || !u) {
+    try { localStorage.removeItem('zw-token'); localStorage.removeItem('zw-user'); } catch (e) {}
+    location.replace('html/login.html');
+  } else {
+    location.replace('html/chat.html');
+  }
+</script>
+</head>
+<body></body>
+</html>

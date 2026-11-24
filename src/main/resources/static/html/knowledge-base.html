@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知微 · 知识库管理</title>
+<link rel="stylesheet" href="../css/zw.css?v=20261021A">
+<style>
+  /* 步骤条 */
+  .steps { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 26px; }
+  .steps .st {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--text-3);
+    padding: 5px 12px; border-radius: 18px; transition: background .15s, color .15s;
+  }
+  .steps .st .idx {
+    width: 18px; height: 18px; border-radius: 50%; background: var(--bg-bubble); color: var(--text-3);
+    font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .steps .st.on { background: var(--bg-active); color: var(--text-2); font-weight: 500; }
+  .steps .st.on .idx { background: rgba(11,87,208,.14); color: var(--text-2); }
+  .steps .st.done { color: var(--text-2); }
+  .steps .st.done .idx { background: var(--green-soft); color: var(--green); }
+  .steps .arw { color: var(--text-4); font-size: 12px; }
+
+  /* 知识库行 */
+  .kb-row {
+    display: flex; align-items: center; gap: 14px; padding: 16px 18px;
+    border: 1px solid var(--line); border-radius: 16px; background: var(--bg);
+    margin-bottom: 10px; transition: box-shadow .14s, transform .14s;
+  }
+  .kb-row:hover { box-shadow: var(--shadow); }
+  .kb-row .meta { flex: 1; min-width: 0; }
+  .kb-row .nm { font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .kb-row .ds { font-size: 13px; color: var(--text-3); margin-top: 3px; }
+  .kb-row .acts { display: flex; align-items: center; gap: 4px; flex: none; }
+  .kb-row .acts .btn { color: var(--text-2); }
+  .kb-row .acts .btn:hover { background: var(--bg-hover); }
+  .kb-row .acts .btn.danger { color: var(--danger); }
+  .kb-row .acts .btn.danger:hover { background: var(--danger-soft); }
+
+  /* 弹窗里的文档行 */
+  .file-row { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--line-soft); }
+  .file-row:last-child { border-bottom: none; }
+  .file-row .meta { flex: 1; min-width: 0; }
+  .file-row .nm { font-size: 14px; word-break: break-all; }
+  .file-row .sub { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 26px; }
+  @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } }
+  .file-pick { display: flex; align-items: center; gap: 10px; height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; }
+  .file-pick .btn { flex: none; }
+  .file-pick .txt { font-size: 14px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gstar" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4285f4"/><stop offset="48%" stop-color="#9b72cb"/><stop offset="100%" stop-color="#d96570"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<div class="app">
+  <!-- ==================== 侧栏 ==================== -->
+  <aside class="side" id="side">
+    <div class="side-hd">
+      <button class="iconbtn" id="btn-collapse" title="收起侧栏">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18"/></svg>
+      </button>
+      <button class="iconbtn" id="btn-logout" title="退出登录">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+      </button>
+    </div>
+    <div class="brand">
+      <svg class="star" viewBox="0 0 24 24"><path fill="url(#gstar)" d="M12 1.8c.62 5 3.3 7.68 8.3 8.3-5 .62-7.68 3.3-8.3 8.3-.62-5-3.3-7.68-8.3-8.3 5-.62 7.68-3.3 8.3-8.3z"/></svg>
+      <span class="grad" style="font-weight:500">知微</span>
+    </div>
+    <div class="side-scroll" id="nav"></div>
+    <div class="side-ft">
+      <button class="userrow"><span class="avatar" id="user-avatar">?</span><span style="flex:1;text-align:left" id="user-name">-</span></button>
+    </div>
+  </aside>
+
+  <!-- ==================== 主区 ==================== -->
+  <main class="main">
+    <div class="topbar">
+      <button class="iconbtn" id="btn-collapse-2" title="侧栏">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18"/></svg>
+      </button>
+      <button class="model">
+        <svg class="star" viewBox="0 0 24 24"><path fill="url(#gstar)" d="M12 1.8c.62 5 3.3 7.68 8.3 8.3-5 .62-7.68 3.3-8.3 8.3-.62-5-3.3-7.68-8.3-8.3 5-.62 7.68-3.3 8.3-8.3z"/></svg>
+        <span class="grad" style="font-weight:500">知识库管理</span>
+      </button>
+      <div class="topbar-right">
+        <span class="pill blue" id="total-pill">0 个知识库</span>
+        <button class="iconbtn" id="btn-theme" title="切换主题">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="page scroll" style="overflow-y:auto">
+      <div class="page-inner">
+
+        <!-- 流程提示 -->
+        <div class="steps" id="steps">
+          <span class="st on" data-s="1"><span class="idx">1</span>上传文档</span>
+          <span class="arw">›</span>
+          <span class="st" data-s="2"><span class="idx">2</span>选择切块方式</span>
+          <span class="arw">›</span>
+          <span class="st" data-s="3"><span class="idx">3</span>预览切块结果</span>
+          <span class="arw">›</span>
+          <span class="st" data-s="4"><span class="idx">4</span>确认入库</span>
+        </div>
+
+        <!-- 我的知识库 -->
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <div style="font-size:16px;font-weight:500">我的知识库</div>
+          <span class="pill" id="kb-count" style="display:none">0</span>
+          <button class="btn solid sm" id="btn-create-kb" style="margin-left:auto">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            新建知识库
+          </button>
+        </div>
+
+        <div id="kb-list"></div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ==================== 文档列表弹窗 ==================== -->
+<div class="mask" id="doc-modal" style="display:none">
+  <div class="modal" style="width:620px">
+    <div class="modal-hd">
+      <h3 id="doc-modal-title">文档列表</h3>
+      <button class="iconbtn" style="margin-left:auto" id="doc-close">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-bd" id="doc-list"></div>
+    <div class="modal-ft">
+      <div class="right">
+        <button class="btn line" id="doc-upload">上传文档</button>
+        <button class="btn solid" id="doc-ok">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 上传文档弹窗 ==================== -->
+<div class="mask" id="up-modal" style="display:none">
+  <div class="modal" style="width:780px">
+    <div class="modal-hd">
+      <h3 id="up-title">上传文档</h3>
+      <button class="iconbtn" style="margin-left:auto" id="up-close">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="modal-bd">
+      <div class="grid2">
+        <!-- 左列 -->
+        <div>
+          <div class="field">
+            <label>文档文件 <span style="color:var(--danger)">*</span></label>
+            <div class="file-pick">
+              <button class="btn line sm" id="up-pick">选择文件</button>
+              <span class="txt" id="up-filename">未选择任何文件</span>
+              <input type="file" id="up-file" style="display:none">
+            </div>
+          </div>
+          <div class="field">
+            <label>切换方式</label>
+            <select class="select" id="up-splitter">
+              <option value="SLIDING">滑动窗口分块</option>
+              <option value="RECURSIVE" selected>递归字符分块</option>
+              <option value="HEADING">标题层级分块</option>
+            </select>
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label>重叠长度 <code style="font-size:12px">overlap</code></label>
+            <input class="input mono" id="up-overlap" value="50">
+          </div>
+        </div>
+
+        <!-- 右列 -->
+        <div>
+          <div class="field">
+            <label>解析方式</label>
+            <select class="select" id="up-parser">
+              <option value="TIKA" selected>Tika（简单文本 / Office）</option>
+              <option value="MINERU">MinerU（扫描件 / 表格图片）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>切换大小 <code style="font-size:12px">chunkSize</code></label>
+            <input class="input mono" id="up-chunk" value="500">
+          </div>
+          <div class="field" style="margin-bottom:0" id="heading-only" hidden>
+            <label>标题层级 <code style="font-size:12px">headingLevel</code></label>
+            <input class="input mono" id="up-level" value="2">
+          </div>
+        </div>
+      </div>
+
+      <!-- 标题分块的额外选项 -->
+      <div id="heading-extra" style="display:none;margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="sw on" id="up-sw"></div>
+          <div style="flex:1">
+            <div style="font-size:14px">启用父子分块</div>
+            <div style="font-size:12.5px;color:var(--text-3)">命中子块后回查父块完整小节</div>
+          </div>
+          <div class="field" style="margin:0;width:170px">
+            <label>父块上限 <code style="font-size:12px">maxParentSize</code></label>
+            <input class="input mono" id="up-parent" value="5000">
+          </div>
+        </div>
+      </div>
+
+      <!-- MinerU 的额外选项 -->
+      <div id="image-extra" style="display:none;margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="sw" id="up-sw-img"></div>
+          <div>
+            <div style="font-size:14px">开启图片语义理解</div>
+            <div style="font-size:12.5px;color:var(--text-3)">用多模态模型描述图里的内容再入库；需先配好 <code>app.model.multimodal.api-key</code></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hint" style="margin-top:14px">
+        Tika 用于有文本层的 PDF / Markdown / TXT；MinerU 用于扫描件与表格图片混排（不支持 .md）。
+      </div>
+
+      <!-- 预览结果 -->
+      <div id="up-preview" style="display:none;margin-top:22px;padding-top:18px;border-top:1px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="font-size:14px;font-weight:600">切块预览</div>
+          <span class="pill blue mono" id="up-count">0</span>
+          <span style="font-size:12.5px;color:var(--text-3)" id="up-docid"></span>
+        </div>
+        <div class="tabs" id="up-tabs">
+          <button class="on" data-v="child">子块</button>
+          <button data-v="parent">父块</button>
+        </div>
+        <div id="up-list"></div>
+      </div>
+    </div>
+
+    <div class="modal-ft">
+      <div class="right">
+        <button class="btn line" id="up-cancel">取消</button>
+        <button class="btn line" id="up-preview-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          预览切块
+        </button>
+        <button class="btn solid" id="up-commit" disabled>确认入库</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../js/zw-common.js?v=20261021A"></script>
+<script src="../js/zw-ui.js?v=20261021A"></script>
+<script src="../js/knowledge-base.js?v=20261021A"></script>
+</body>
+</html>

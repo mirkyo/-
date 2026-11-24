@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知微 · 登录</title>
+<link rel="stylesheet" href="../css/zw.css?v=20261021A">
+<style>
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+    background:radial-gradient(120% 90% at 50% 0%, var(--grad-soft), transparent 60%), var(--bg)}
+  .card{width:100%;max-width:400px;background:var(--bg);border:1px solid var(--line);border-radius:24px;
+    padding:32px 28px 26px;box-shadow:var(--shadow)}
+  .brand-row{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:6px}
+  .brand-row .star{width:30px;height:30px}
+  .brand-row .name{font-size:26px;font-weight:500}
+  .sub{text-align:center;font-size:13.5px;color:var(--text-3);margin-bottom:24px}
+  .tabs{justify-content:center;margin-bottom:22px}
+  .form{display:none}
+  .form.on{display:block}
+  .err{font-size:12.5px;color:var(--danger);min-height:18px;margin:-6px 0 10px}
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="card">
+    <div class="brand-row">
+      <svg class="star" viewBox="0 0 24 24"><path fill="url(#gstar)" d="M12 1.8c.62 5 3.3 7.68 8.3 8.3-5 .62-7.68 3.3-8.3 8.3-.62-5-3.3-7.68-8.3-8.3 5-.62 7.68-3.3 8.3-8.3z"/></svg>
+      <span class="name grad">知微</span>
+    </div>
+    <div class="sub">智能体对话平台</div>
+
+
+    <!-- 登录 -->
+    <form class="form on" id="form-login" autocomplete="on">
+      <div class="field">
+        <label>用户名</label>
+        <input class="input" id="login-username" placeholder="admin" autocomplete="username">
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input class="input" id="login-password" type="password" placeholder="请输入密码" autocomplete="current-password">
+      </div>
+      <div class="err" id="login-err"></div>
+      <button class="btn solid" type="submit" style="width:100%;justify-content:center;height:44px">登录</button>
+    </form>
+
+  </div>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gstar" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4285f4"/>
+      <stop offset="48%" stop-color="#9b72cb"/>
+      <stop offset="100%" stop-color="#d96570"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<script src="../js/zw-common.js?v=20261021A"></script>
+<script src="../js/login.js?v=20261021A"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+# ---------- 构建产物 ----------
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+*.jar
+*.war
+
+# ---------- IDE ----------
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+*.swp
+
+# ---------- 运行期数据 ----------
+data/
+logs/
+*.log
+app.log
+app-local.log
+
+# ---------- 本地敏感配置 ----------
+.env
+application-local.yml
+**/application-local.yml
+config-local/
+
+# ---------- 打包产物 ----------
+deploy/_pkg/
+deploy/dist/
+*.zip
+*.tar.gz
+
+# ---------- 系统文件 ----------
+.DS_Store
+Thumbs.db
+desktop.ini

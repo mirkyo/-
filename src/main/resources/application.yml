@@ -1,0 +1,168 @@
+server:
+  port: 8088
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: zw-agent-platform
+  profiles:
+    active: local
+
+  # ===== 主数据源：MySQL（业务表 + 框架 agentx_session / agentx_conversation / agentx_pause_state）=====
+  # 本机跑走 localhost:3306（docker 已映射出来）；容器内跑由 MYSQL_HOST=mysql 覆盖
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:ziwei_kb}?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:}
+    hikari:
+      pool-name: ZwHikariCP
+      minimum-idle: 2
+      maximum-pool-size: 12
+      connection-timeout: 30000
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 200MB
+
+  # ===== 关掉 Spring AI 的自动装配模型（openai/deepseek/zhipuai starter 都被 agentx-core 带进来了）
+  #       模型统一由 ModelProvider 按 app.model.* 手动创建，避免多 provider 争抢同一个 Bean
+  ai:
+    model:
+      chat: none
+      embedding: none
+      image: none
+      audio:
+        speech: none
+        transcription: none
+      moderation: none
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+app:
+  # ===== 模型：key 直接写这里 =====
+  model:
+    chat:
+      # 千问 MaaS 兼容接口（Spring AI 会自己拼 /chat/completions，base-url 只到 /v1）
+      base-url: https://maas.qianwenaiapi.com/compatible-mode
+      api-key: "${QWEN_MAAS_API_KEY:}"
+      model: qwen3.7-flash
+      temperature: 0.7
+      timeout-seconds: 300
+    embedding:
+      # 向量：与新平台同一把 key，维度仍是 1024，无需重建 collection
+      base-url: https://maas.qianwenaiapi.com/compatible-mode
+      api-key: "${QWEN_MAAS_API_KEY:}"
+      model: qwen3.7-text-embedding-flash
+      dimensions: 1024   # 该模型输出 1024 维，向量库 collection 必须与之一致
+    multimodal:
+      base-url: https://maas.qianwenaiapi.com/compatible-mode
+      api-key: "${QWEN_MAAS_API_KEY:}"
+      model: qwen3.7-flash
+      temperature: 0.2
+
+  # ===== 助手：平台只有一个（已取消智能体广场） =====
+  assistant:
+    name: 知微助手
+    # 模型档位：key 前端传、label 界面显示（= 人设自称）、model 真实模型名
+    # 顺序即下拉框顺序。当前全部指向 qwen3.7-flash；要接真模型改 model 字段即可
+    models:
+      - { key: opus55,     label: "Opus 5.5",           model: qwen3.7-flash }
+      - { key: sonnet55,   label: "Sonnet 5.5",         model: qwen3.7-flash }
+      - { key: haiku55,    label: "Haiku 5.5",          model: qwen3.7-flash }
+      - { key: gpt6astra,  label: "GPT-6 Astra",        model: qwen3.7-flash }
+      - { key: gpt61sol,   label: "GPT-6.1 Sol",        model: qwen3.7-flash }
+      - { key: gpt6luna,   label: "GPT-6 Luna",         model: qwen3.7-flash }
+      - { key: ds41flash,  label: "DeepSeek V4.1 Flash", model: qwen3.7-flash }
+      - { key: ds4pro,     label: "DeepSeek V4 Pro",    model: qwen3.7-flash }
+      - { key: glm53,      label: "GLM-5.3",            model: qwen3.7-flash }
+      - { key: glm53flash, label: "GLM-5.3 Flash",      model: qwen3.7-flash }
+      - { key: kimik3,     label: "Kimi K3",            model: qwen3.7-flash }
+      - { key: kimik26,    label: "Kimi K2.6",          model: qwen3.7-flash }
+    # 追加个性化要求，会和通用前言拼接
+    # 模型自称由代码按档位注入：flash → Sonnet 5.5，pro → Opus 5.5（见 AgentConfig）
+    instructions: ""
+    enable-thinking: true
+    enable-todo: false
+    enable-ask-user: false   # 关掉反问（ask_user 工具会让流挂起等待，前端不展示会像"不回答"）
+
+  agent:
+    # 技能目录：每个技能一个子目录，内含 SKILL.md；已启用的技能会被助手自动挂载
+    skills-dir: ./data/skills
+    default-max-rounds: 30
+    enable-trace: true   # 开启后每轮 LLM/工具调用写入 agentx_trace，刷新后能回放思考过程
+    # 无沙箱时本地工具组（bash/文件/grep/python）默认关闭
+    allow-local-tools: false
+
+  rag:
+    # 向量库类型：qdrant（默认）/ pgvector（已弃用，仅兼容）
+    vector-store: ${ZW_VECTOR_STORE:qdrant}
+    qdrant:
+      host: ${QDRANT_HOST:127.0.0.1}
+      port: ${QDRANT_PORT:6334}
+      api-key: ${QDRANT_API_KEY:}
+      collection: ${QDRANT_COLLECTION:ziwei_rag}
+    # 以下 pgvector 段仅在 vector-store=pgvector 时生效（已不推荐）
+    pgvector:
+      host: ${PG_HOST:localhost}
+      port: ${PG_PORT:15432}
+      database: ${PG_DB:vector_store}
+      username: ${PG_USER:postgres}
+      password: ${PG_PASSWORD:}
+      vector-table: agentx_rag_vector
+      parent-table: agentx_rag_document
+    chunk:
+      chunk-size: 500
+      overlap: 50
+      max-chunks: 20000
+      heading-level: 2
+      max-parent-size: 5000
+    upload:
+      max-file-size-mb: 50
+    # MinerU 在线服务 token；留空则默认走 TIKA
+    mineru:
+      token: "${MINERU_TOKEN:}"
+      # MinerU 解析出的图片落这个目录：{asset-dir}/{documentId}/{图片名}
+      asset-dir: ${ZW_ASSET_DIR:./data/assets}
+    # 查询增强：照 aicube-robot 的实际取舍，默认全关
+    query-enhance:
+      compression: false
+      hyde: false
+      multi-query: false
+    rerank:
+      enabled: true
+      # 百炼 rerank 走专用端点（RagService 会按 base-url 自动选嵌套格式）
+      base-url: https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank
+      api-key: "${DASHSCOPE_API_KEY:}"
+      model: qwen3.7-text-rerank
+      top-k: 3
+
+  jwt:
+    secret: "${JWT_SECRET}"
+    expire-hours: 24
+
+  # 首次启动自动初始化的超管与默认租户
+  init:
+    tenant-name: 默认租户
+    tenant-code: default
+    username: "${INIT_ADMIN_USERNAME:admin}"
+    password: "${INIT_ADMIN_PASSWORD:}"
+
+logging:
+  level:
+    root: INFO
+    com.ziwei.zw: DEBUG
+    com.agentx.ai: INFO
