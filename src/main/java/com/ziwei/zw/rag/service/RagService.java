@@ -43,12 +43,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 知识库服务：库里表 + 两阶段入库（预览 → 确认）+ 检索编排。
@@ -437,11 +439,55 @@ public class RagService {
             if (parsed.isEmpty()) {
                 throw BizException.badRequest("解析结果为空，可能是扫描件（图片型 PDF），请改用 MinerU 解析器");
             }
-            return buildSplitter(splitter, chunkSize, overlap, maxParentSize, headingLevel, parentChild)
+            List<Document> split = buildSplitter(splitter, chunkSize, overlap, maxParentSize, headingLevel, parentChild)
                     .split(parsed);
+            // 兜底硬切：MinerU 把整页表格识别成一个 <table> HTML 块时，里面几乎没有换行/标点，
+            // RecursiveSplitter 找不到切分点会整块返回（实测出现过 28KB 单块），
+            // 送去 embedding 会报 "Tokens in a single document exceeds the maximum..."。
+            // 这里按字符硬切，保证每块不超过 chunkSize 的安全上限。
+            return enforceMaxChars(split, chunkSize);
         } catch (StackOverflowError e) {
             throw BizException.badRequest("文档解析失败：文件过大或结构过于复杂，请拆分后重试");
         }
+    }
+
+    /** 单块字符上限的硬性兜底倍数（splitter 正常切分时不会触发） */
+    private static final int HARD_SPLIT_FACTOR = 4;
+
+    /**
+     * 保证没有任何一块超过 {@code chunkSize * HARD_SPLIT_FACTOR} 字符。
+     * 超长块按字符切分，元数据（含图片 assetId、contentType）原样继承到每个子块上。
+     */
+    private static List<Document> enforceMaxChars(List<Document> docs, int chunkSize) {
+        int limit = Math.max(chunkSize * HARD_SPLIT_FACTOR, 1200);
+        boolean needFix = docs.stream()
+                .anyMatch(d -> d.getText() != null && d.getText().length() > limit);
+        if (!needFix) {
+            return docs;
+        }
+        List<Document> out = new ArrayList<>(docs.size() * 2);
+        for (Document doc : docs) {
+            String text = doc.getText();
+            if (text == null || text.length() <= limit) {
+                out.add(doc);
+                continue;
+            }
+            int seq = 0;
+            for (int i = 0; i < text.length(); i += limit) {
+                String part = text.substring(i, Math.min(text.length(), i + limit));
+                Map<String, Object> meta = new HashMap<>(doc.getMetadata());
+                meta.put("hardSplit", true);
+                meta.put("hardSplitSeq", seq);
+                meta.put("hardSplitFrom", doc.getId());
+                // 向量库要求 id 是合法 UUID：不能用 "原id-h1" 这种拼接。
+                // 用「原文 + 序号」重新生成确定性 UUID，保证同内容重复入库 id 稳定。
+                String newId = UUID.nameUUIDFromBytes(
+                        (doc.getId() + "#" + seq).getBytes(StandardCharsets.UTF_8)).toString();
+                seq++;
+                out.add(new Document(newId, part, meta));
+            }
+        }
+        return out;
     }
 
     /**
